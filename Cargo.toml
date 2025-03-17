@@ -1,0 +1,4 @@
+[workspace]
+members = [ "qeap","qeap_macro"]
+
+resolver = "3"
