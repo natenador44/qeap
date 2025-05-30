@@ -1,3 +1,18 @@
+use qeap::Qeap;
+use serde::{Deserialize, Serialize};
+
+#[derive(Default, Serialize, Deserialize, Qeap)]
+#[qeap(dir = "test_data")]
+pub struct Something {
+    something_something: u8,
+}
+
+#[qeap::scoped]
+pub fn scoped_func(data: &mut Something) -> Result<(), Box<dyn std::error::Error>> {
+    data.something_something = 4;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -47,5 +62,18 @@ mod tests {
         actual.port = 8080;
 
         actual.save().expect("save works")
+    });
+
+    qeap_test!(load_after_save_reflects_changes_made_before_save => {
+        let mut expected = Config::load().unwrap();
+
+        expected.port = 8080;
+        expected.log_location = "logs".into();
+
+        expected.save().expect("save works");
+
+        let actual = Config::load().unwrap();
+
+        assert_eq!(expected, actual);
     });
 }
