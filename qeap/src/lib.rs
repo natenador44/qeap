@@ -1,14 +1,20 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+pub mod error;
+pub mod load;
+pub mod save;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+// might think about adding different formats... need to make sure, if behind features, that they are additive
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
+extern crate qeap_macro;
+pub use qeap_macro::Qeap;
+
+pub type QeapLoadResult<T> = Result<T, error::LoadError>;
+pub type QeapSaveResult<T> = Result<T, error::SaveError>;
+
+pub trait Qeap {
+    const FILE_NAME: &str;
+
+    fn load() -> QeapLoadResult<Self>
+    where
+        Self: Sized;
+    fn save(&self) -> QeapSaveResult<()>;
 }

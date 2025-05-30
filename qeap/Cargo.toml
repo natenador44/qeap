@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+dashmap = "6.1.0"
+qeap_macro = { path = "../qeap_macro" }
+serde = "1.0.219"
+serde_json = { version = "1.0.140" }
+thiserror = "2.0.12"

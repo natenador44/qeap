@@ -1,4 +1,4 @@
 [workspace]
-members = [ "qeap","qeap_macro"]
+members = [ "qeap","qeap_macro", "tests"]
 
 resolver = "3"
