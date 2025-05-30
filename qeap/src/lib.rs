@@ -6,6 +6,7 @@ pub mod save;
 
 extern crate qeap_macro;
 pub use qeap_macro::Qeap;
+pub use qeap_macro::scoped;
 
 pub type QeapLoadResult<T> = Result<T, error::LoadError>;
 pub type QeapSaveResult<T> = Result<T, error::SaveError>;
