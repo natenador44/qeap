@@ -42,6 +42,11 @@ Perfect for:
 
 This library is ideal for developers who want persistent storage with minimal setup - just add the derive macro and you're ready to go!
 
+## What QEAP Is _Not_ Meant For
+
+- Ease of use is the primary goal of QEAP, so it may not make sense to use this in perfomance critical applications. It _could_ be used without much detriment, if used sparingly. It all depends on your use case.
+- QEAP is not meant to handle complex relationships between the data it manages. If you need to manage complex relationships, you should use something else (like a relational database). There may be some low-hanging fruit that could be implemented in future releases, but nothing complex.
+
 ## How To Use
 Add `qeap` and `serde` to your project.
 ```sh
