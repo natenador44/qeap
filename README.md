@@ -130,7 +130,7 @@ fn main(config: &mut Config) -> qeap::QeapResult<()> {
 This generates a `main` method for your application that automatically loads the data you need at the start, then saves it right before the application exits.
 
 #### Panic inside `qeap::scoped` functions
-There is none at the moment. If you annotate a function with `qeap::scoped` and code within that function panics, `qeap::scoped` does not handle that, and will not save your data. This may be supported in the future (as an optional feature). It's important to remember that even if this becomes a feature, it won't do diddly-squat if your executable is configured to abort on panic. This is why I am undecided at the moment.
+There is no support for panics at the moment. If you annotate a function with `qeap::scoped` and code within that function panics, `qeap::scoped` does not handle that, and will not save your data. This may be supported in the future (as an optional feature). It's important to remember that even if this becomes a feature, it won't do diddly-squat if your executable is configured to abort on panic. This is why I am undecided at the moment.
 
 #### Signals
 `qeap::scoped` does not handle signals sent to your program (e.g. interrupt or kill). So if your function is running and you press Ctrl-c, your data won't be saved.
