@@ -64,7 +64,7 @@ pub fn derive_qeap(input: TokenStream) -> TokenStream {
         impl qeap::Qeap for #type_name {
             const FILE_NAME: &str = #file_name;
 
-            fn load() -> qeap::QeapLoadResult<Self>
+            fn load() -> qeap::QeapResult<Self>
             where
                 Self: Sized
             {

@@ -5,11 +5,18 @@ use serde::{Deserialize, Serialize};
 #[qeap(dir = "test_data")]
 pub struct Something {
     something_something: u8,
+    port: u16,
 }
 
 #[qeap::scoped]
 pub fn scoped_func(data: &mut Something) -> Result<(), Box<dyn std::error::Error>> {
     data.something_something = 4;
+    Ok(())
+}
+
+#[qeap::scoped]
+fn update_port(config: &mut Something) -> qeap::QeapResult<()> {
+    config.port = 8080;
     Ok(())
 }
 

@@ -1,7 +1,7 @@
 use std::{io, path::PathBuf};
 
 #[derive(Debug, thiserror::Error)]
-pub enum LoadError {
+pub enum Error {
     #[error("{0}")]
     Init(#[from] InitError),
     #[error("Failed to open {0} for reading: {1}")]

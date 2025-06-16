@@ -8,13 +8,13 @@ extern crate qeap_macro;
 pub use qeap_macro::Qeap;
 pub use qeap_macro::scoped;
 
-pub type QeapLoadResult<T> = Result<T, error::LoadError>;
+pub type QeapResult<T> = Result<T, error::Error>;
 pub type QeapSaveResult<T> = Result<T, error::SaveError>;
 
 pub trait Qeap {
     const FILE_NAME: &str;
 
-    fn load() -> QeapLoadResult<Self>
+    fn load() -> QeapResult<Self>
     where
         Self: Sized;
     fn save(&self) -> QeapSaveResult<()>;
