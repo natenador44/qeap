@@ -4,7 +4,7 @@ QEAP is a Rust library that eliminates the boilerplate typically required for st
 
 ## Key Features
 
-- Zero-boilerplate persistence: Simply derive Qeap on your structs and specify a storage directory
+- Zero-boilerplate persistence: Simply derive Qeap on your types and specify a storage directory
 - Automatic file management: Creates directories and JSON files automatically
 - Default initialization: If no saved data exists, loads using the struct's Default implementation
 - Type-safe operations: Leverages Rust's type system and serde for reliable serialization/deserialization
@@ -97,11 +97,11 @@ fn update_port(config: &mut Config) -> qeap::QeapResult<()> {
 The `update_port` function is expanded into this.
 ```rust
 fn update_port() -> qeap::QeapResult<()> {
-    fn update_port_inner(config: &mut Something) -> qeap::QeapResult<()> {
+    fn update_port_inner(config: &mut Config) -> qeap::QeapResult<()> {
         config.port = 8080;
         Ok(())
     }
-    let mut config: Something = qeap::Qeap::load()?;
+    let mut config: Config = qeap::Qeap::load()?;
     let result = update_port_inner(&mut config);
     qeap::Qeap::save(&config)?;
     return result;
@@ -128,3 +128,21 @@ fn main(config: &mut Config) -> qeap::QeapResult<()> {
 ```
 
 This generates a `main` method for your application that automatically loads the data you need at the start, then saves it right before the application exits.
+
+#### Panic inside `qeap::scoped` functions
+There is none at the moment. If you annotate a function with `qeap::scoped` and code within that function panics, `qeap::scoped` does not handle that, and will not save your data. This may be supported in the future (as an optional feature). It's important to remember that even if this becomes a feature, it won't do diddly-squat if your executable is configured to abort on panic. This is why I am undecided at the moment.
+
+#### Signals
+`qeap::scoped` does not handle signals sent to your program (e.g. interrupt or kill). So if your function is running and you press Ctrl-c, your data won't be saved.
+
+## Future Features
+
+### Different File Formats
+The user of the library should be able to choose from different file formats (e.g. JSON, TOML, YAML).
+
+### Signal Handling for `qeap::scoped`
+At the moment, if a function annotated with `qeap::scoped` is interrupted or killed, the save will not happen. Ideally there'd be an optional feature that can be turned on that catches these types of signals and handles them gracefully (i.e. saving data managed by QEAP).
+
+### Async Support
+Ideally, `qeap::scoped` could be used with `async` functions. This will require an `async` version of the `Qeap` trait or its methods, which does not exist in this version. It would also require either choosing an async I/O implementation (like tokio), forcing users of the library to use that implementation, or abstracting it away and letting the user choose one. This is all work that will be done, but only in later versions.
+It would also be important that `qeap::scoped` is compatible with other async main method macro alterations, like `tokio::main`.
