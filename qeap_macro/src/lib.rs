@@ -95,15 +95,16 @@ pub fn derive_qeap(input: TokenStream) -> TokenStream {
 
 struct VarUse<'a> {
     name: &'a Ident,
-    ref_type: &'a RefType,
+    ref_type: &'a VarType,
 }
 
 impl ToTokens for VarUse<'_> {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let name = self.name;
         let as_tokens = match self.ref_type {
-            RefType::Immutable => quote! { &#name },
-            RefType::Mutable => quote! { &mut #name },
+            VarType::ImmutableRef(_) => quote! { &#name },
+            VarType::MutableRef(_) => quote! { &mut #name },
+            VarType::Handle(_) => quote! { qeap::Handle::new_handle(&#name) },
         };
 
         tokens.extend(as_tokens);
@@ -112,20 +113,22 @@ impl ToTokens for VarUse<'_> {
 
 struct FieldDeclaration<'a> {
     name: &'a Ident,
-    ty: &'a Type,
-    ref_type: &'a RefType,
+    var_type: &'a VarType,
 }
 
 impl ToTokens for FieldDeclaration<'_> {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let name = self.name;
-        let ty = self.ty;
+        let ty = match &self.var_type {
+            VarType::ImmutableRef(r) | VarType::MutableRef(r) => &*r.elem,
+            VarType::Handle(t) => t,
+        };
 
-        let as_tokens = match self.ref_type {
-            RefType::Immutable => quote! {
+        let as_tokens = match self.var_type {
+            VarType::ImmutableRef(_) | VarType::Handle(_) => quote! {
                 let #name: #ty
             },
-            RefType::Mutable => {
+            VarType::MutableRef(_) => {
                 quote! { let mut #name: #ty }
             }
         };
@@ -136,23 +139,27 @@ impl ToTokens for FieldDeclaration<'_> {
 
 struct ScopeField {
     name: Ident,
-    reference: TypeReference,
-    ref_type: RefType,
+    var_type: VarType,
 }
 
 impl ScopeField {
-    fn as_var_use(&self) -> VarUse {
+    fn as_var_use(&self) -> VarUse<'_> {
         VarUse {
             name: &self.name,
-            ref_type: &self.ref_type,
+            ref_type: &self.var_type,
         }
     }
 
-    fn as_field_declaration(&self) -> FieldDeclaration {
+    fn as_field_declaration(&self) -> FieldDeclaration<'_> {
         FieldDeclaration {
             name: &self.name,
-            ty: &*self.reference.elem,
-            ref_type: &self.ref_type,
+            var_type: &self.var_type,
+        }
+    }
+
+    fn as_field_initialization(&self) -> FieldInitialization<'_> {
+        FieldInitialization {
+            _var_type: &self.var_type,
         }
     }
 }
@@ -162,7 +169,6 @@ impl From<&PatType> for ScopeField {
         match &*value.pat {
             syn::Pat::Ident(field_name) => {
                 let name = field_name.ident.clone();
-                let reference;
 
                 let ref_type = match &*value.ty {
                     // by reference and immutable
@@ -170,41 +176,44 @@ impl From<&PatType> for ScopeField {
                         tr @ TypeReference {
                             mutability: None, ..
                         },
-                    ) => {
-                        reference = tr.clone();
-                        RefType::Immutable
-                    }
+                    ) => VarType::ImmutableRef(tr.clone()),
                     // by reference and mutable
                     Type::Reference(
                         tr @ TypeReference {
                             mutability: Some(_),
                             ..
                         },
-                    ) => {
-                        reference = tr.clone();
-                        RefType::Mutable
-                    }
+                    ) => VarType::MutableRef(tr.clone()),
                     // by value and mutable
-                    _ => panic!(
-                        "Only ident pattern function arguments passed by reference are supported, i.e. `field: &Type` or `field: &mut Type`"
-                    ),
+                    other => VarType::Handle(other.clone()),
                 };
 
                 Self {
                     name,
-                    reference,
-                    ref_type,
+                    var_type: ref_type,
                 }
             }
-            _ => panic!("Only ident pattern function arguments are supported, i.e. `field: Type`"),
+            other => panic!(
+                "Only ident pattern function arguments are supported, i.e. `field: Type`: {other:?}"
+            ),
         }
     }
 }
 
-/// For scopes, we always pass the fields by reference. We only need to differientiate between mutable and not.
-enum RefType {
-    Immutable,
-    Mutable,
+struct FieldInitialization<'a> {
+    _var_type: &'a VarType,
+}
+
+impl ToTokens for FieldInitialization<'_> {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        tokens.extend(quote! { qeap::Qeap::load()? });
+    }
+}
+
+enum VarType {
+    ImmutableRef(TypeReference),
+    MutableRef(TypeReference),
+    Handle(Type),
 }
 
 #[proc_macro_attribute]
@@ -227,6 +236,9 @@ pub fn scoped(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let var_use = scoped_fields.iter().map(ScopeField::as_var_use);
     let field_decls = scoped_fields.iter().map(ScopeField::as_field_declaration);
+    let field_inits = scoped_fields
+        .iter()
+        .map(ScopeField::as_field_initialization);
 
     let scoped_field_names = scoped_fields.iter().map(|f| &f.name).collect::<Vec<_>>();
 
@@ -238,7 +250,7 @@ pub fn scoped(_attr: TokenStream, item: TokenStream) -> TokenStream {
         fn #func_name() #return_type {
             #func
             #(
-                #field_decls = qeap::Qeap::load()?;
+                #field_decls = #field_inits;
             )*
 
             let result = #inner_func_name(#(#var_use),*);
@@ -250,8 +262,6 @@ pub fn scoped(_attr: TokenStream, item: TokenStream) -> TokenStream {
             return result;
         }
     };
-
-    println!("{out}");
 
     out.into()
 }

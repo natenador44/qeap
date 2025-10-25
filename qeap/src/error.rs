@@ -20,6 +20,8 @@ pub enum SaveError {
     Open(PathBuf, io::Error),
     #[error("Failed to parse {0} as JSON: {1}")]
     JsonWrite(PathBuf, serde_json::Error),
+    #[error("Failed to save due to lock poisoning")]
+    LockPoison,
 }
 
 #[derive(Debug, thiserror::Error)]
