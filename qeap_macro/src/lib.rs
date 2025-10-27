@@ -3,7 +3,8 @@
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use syn::{
-    Attribute, DeriveInput, Expr, Ident, PatType, Token, Type, TypeReference, parse_macro_input,
+    Attribute, DeriveInput, Expr, Ident, PatType, Token, Type, TypeReference, parse::Parse,
+    parse_macro_input,
 };
 
 use quote::{ToTokens, quote};
@@ -216,8 +217,42 @@ enum VarType {
     Handle(Type),
 }
 
+#[derive(Default)]
+enum ScopedMode {
+    #[default]
+    Nested,
+    Flatten,
+    Absorb,
+    Expect,
+}
+
+impl Parse for ScopedMode {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        if input.is_empty() {
+            return Ok(Self::default());
+        }
+
+        let ident: Ident = input.parse()?;
+
+        let mode = match ident.to_string().to_lowercase().as_str() {
+            "flatten" => Self::Flatten,
+            "absorb" => Self::Absorb,
+            "expect" => Self::Expect,
+            other => {
+                return Err(syn::Error::new(
+                    ident.span(),
+                    format!("Expected 'flatten', 'absorb', or 'expect', got '{other}'"),
+                ));
+            }
+        };
+
+        Ok(mode)
+    }
+}
+
 #[proc_macro_attribute]
-pub fn scoped(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn scoped(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let scoped_mode = parse_macro_input!(attr as ScopedMode);
     let mut func = parse_macro_input!(item as syn::ItemFn);
 
     let func_name = func.sig.ident.clone();

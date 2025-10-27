@@ -19,6 +19,29 @@ use crate::error::SaveError;
 pub type QeapResult<T> = Result<T, error::Error>;
 pub type QeapSaveResult<T> = Result<T, error::SaveError>;
 
+pub enum WrappedError<E> {
+    Qeap(error::Error),
+    Wrapped(E),
+}
+
+pub trait IntoQeapResult<T, E> {
+    fn into_qeap_result(self) -> Result<T, error::Error>;
+}
+
+// For non-Result types
+impl<T> IntoQeapResult<T, ()> for T {
+    fn into_qeap_result(self) -> Result<T, error::Error> {
+        Ok(self)
+    }
+}
+
+// For Result types
+impl<T, E: Into<error::Error>> IntoQeapResult<T, E> for Result<T, E> {
+    fn into_qeap_result(self) -> Result<T, error::Error> {
+        self.map_err(Into::into)
+    }
+}
+
 pub trait Qeap {
     const FILE_NAME: &str;
 
