@@ -7,6 +7,18 @@ use std::{
 use qeap::Qeap;
 use serde::{Deserialize, Serialize};
 
+#[allow(unused)]
+enum MyError {
+    Bad(String),
+    Qeap(qeap::error::Error),
+}
+
+impl From<qeap::error::Error> for MyError {
+    fn from(value: qeap::error::Error) -> Self {
+        MyError::Qeap(value)
+    }
+}
+
 #[derive(Default, Serialize, Deserialize, Qeap)]
 #[qeap(dir = "test_data")]
 pub struct Config {
@@ -14,29 +26,26 @@ pub struct Config {
     port: u16,
 }
 
-#[qeap::scoped]
-pub fn immut_ref(data: &Config) -> Result<(), Box<dyn std::error::Error>> {
+#[qeap::scoped(flatten)]
+pub fn immut_ref(data: &Config) {
     println!("{}", data.something_something);
-    Ok(())
 }
 
-#[qeap::scoped]
-fn mut_ref(config: &mut Config) -> qeap::QeapResult<()> {
+#[qeap::scoped(absorb)]
+fn mut_ref(config: &mut Config) -> Result<(), MyError> {
     config.port = 8080;
     Ok(())
 }
 
-#[qeap::scoped]
-fn config_rc(config: Rc<Config>) -> qeap::QeapResult<()> {
+#[qeap::scoped(flatten_erased)]
+fn config_rc(config: Rc<Config>) {
     println!("{}", config.port);
-    Ok(())
 }
 
-#[qeap::scoped]
-fn config_rc_ref_cell(config: Rc<RefCell<Config>>) -> qeap::QeapResult<()> {
+#[qeap::scoped(expect)]
+fn config_rc_ref_cell(config: Rc<RefCell<Config>>) {
     let c = config.borrow();
     println!("{}", c.port);
-    Ok(())
 }
 
 #[qeap::scoped]

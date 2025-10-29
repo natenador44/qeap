@@ -1,5 +1,21 @@
 use std::{io, path::PathBuf};
 
+pub type FlattenErasedError = FlattenedError<Box<dyn std::error::Error>>;
+
+#[derive(Debug, thiserror::Error)]
+pub enum FlattenedError<E> {
+    #[error(transparent)]
+    Qeap(#[from] Error),
+    #[error(transparent)]
+    User(E),
+}
+
+impl<E> From<SaveError> for FlattenedError<E> {
+    fn from(value: SaveError) -> Self {
+        Self::Qeap(Error::Save(value))
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("{0}")]
