@@ -3,7 +3,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use syn::{
-    Attribute, DeriveInput, Expr, GenericArgument, Ident, ItemFn, PatType, PathArguments,
+    Attribute, DeriveInput, Expr, GenericArgument, Ident, ItemFn, Pat, PatType, PathArguments,
     PathSegment, ReturnType, Token, Type, TypeReference, parse::Parse, parse_macro_input,
 };
 
@@ -90,6 +90,41 @@ pub fn derive_qeap(input: TokenStream) -> TokenStream {
             }
         }
     };
+
+    out.into()
+}
+
+#[proc_macro_attribute]
+pub fn scoped_test(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let test_attributes = parse_macro_input!(attr as ScopedTestAttributes);
+    let func = parse_macro_input!(item as syn::ItemFn);
+
+    let scoped_fn = create_scoped_fn(test_attributes.scoped_mode, func);
+    let scoped_fn_name = &scoped_fn.og_func.sig.ident;
+
+    let test_fn_name = Ident::new(&format!("test_{}", scoped_fn_name), Span::call_site());
+
+    let expected_output = test_attributes.expected_ret_pat;
+
+    let out = quote! {
+        #[test]
+        fn #test_fn_name() {
+            #scoped_fn
+            let actual = #scoped_fn_name(); // this does nothing right now.. but let's the test run at least
+            assert!(matches!(actual, #expected_output));
+        }
+    };
+
+    out.into()
+}
+
+#[proc_macro_attribute]
+pub fn scoped(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let scoped_mode = parse_macro_input!(attr as ScopedMode);
+    let func = parse_macro_input!(item as syn::ItemFn);
+    let scoped_fn = create_scoped_fn(scoped_mode, func);
+
+    let out = quote! { #scoped_fn };
 
     out.into()
 }
@@ -318,178 +353,248 @@ fn gather_scoped_fields(func: &ItemFn) -> Vec<ScopeField> {
         .collect()
 }
 
-#[proc_macro_attribute]
-pub fn scoped_test(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let scoped_mode = parse_macro_input!(attr as ScopedMode);
-    let func = parse_macro_input!(item as syn::ItemFn);
-
-    let scoped_fn = do_scoped(scoped_mode, func);
-
-    let out = quote! {
-        #[test]
-        #scoped_fn
-    };
-
-    out.into()
+struct ScopedFn {
+    scoped_mode: ScopedMode,
+    scoped_fields: Vec<ScopeField>,
+    output: proc_macro2::TokenStream,
+    og_func: ItemFn,
 }
 
-#[proc_macro_attribute]
-pub fn scoped(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let scoped_mode = parse_macro_input!(attr as ScopedMode);
-    let func = parse_macro_input!(item as syn::ItemFn);
-    let out = do_scoped(scoped_mode, func);
+impl ToTokens for ScopedFn {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        let var_use = self.scoped_fields.iter().map(ScopeField::as_var_use);
+        let field_decls = self
+            .scoped_fields
+            .iter()
+            .map(ScopeField::as_field_declaration);
+        let field_names = self.scoped_fields.iter().map(|f| &f.name);
 
-    out.into()
+        let func_name = &self.og_func.sig.ident;
+
+        let inner_func_name = Ident::new(&format!("{}_inner", func_name), Span::call_site());
+
+        let mut func = self.og_func.clone();
+
+        let return_expr = &self.output;
+
+        func.sig.ident = inner_func_name.clone();
+
+        let t = match self.scoped_mode {
+            ScopedMode::Nested => {
+                quote! {
+                    fn #func_name() -> #return_expr {
+                        #func
+                        #(
+                            #field_decls = ::qeap::Qeap::load()?;
+                            )*
+
+                            let result = #inner_func_name(#(#var_use),*);
+
+                        #(
+                            ::qeap::Qeap::save(&#field_names)?;
+                        )*
+
+                        Ok(result)
+                    }
+                }
+            }
+            ScopedMode::Absorb => {
+                quote! {
+                    fn #func_name() -> #return_expr {
+                        #func
+                        #(
+                            #field_decls = ::qeap::Qeap::load()?;
+                            )*
+
+                            let result = #inner_func_name(#(#var_use),*);
+
+                        #(
+                            ::qeap::Qeap::save(&#field_names).map_err(|e| ::qeap::error::Error::Save(e))?;
+                        )*
+
+                        result
+                    }
+                }
+            }
+            ScopedMode::FlattenErased => {
+                quote! {
+                    fn #func_name() -> #return_expr {
+                        #func
+                        #(
+                            #field_decls = ::qeap::Qeap::load()?;
+                        )*
+
+                        let result = ::qeap::transform::IntoFlattenErasedResult::into_flatten_erased(#inner_func_name(#(#var_use),*));
+
+                        #(
+                            ::qeap::Qeap::save(&#field_names).map_err(|e| ::qeap::error::Error::Save(e))?;
+                        )*
+
+                        result
+                    }
+                }
+            }
+            ScopedMode::Flatten => {
+                quote! {
+                    fn #func_name() -> #return_expr {
+                        #func
+                        #(
+                            #field_decls = ::qeap::Qeap::load()?;
+                        )*
+
+                        let result = ::qeap::transform::IntoFlattenedResult::into_flattened(#inner_func_name(#(#var_use),*));
+
+                        #(
+                            ::qeap::Qeap::save(&#field_names)?;
+                        )*
+
+                        result
+                    }
+                }
+            }
+            ScopedMode::Expect => {
+                let expect_save_msg = self
+                    .scoped_fields
+                    .iter()
+                    .map(|f| format!("{} data should save successfully", f.name));
+                let expect_load_msg = self
+                    .scoped_fields
+                    .iter()
+                    .map(|f| format!("{} data should load successfully", f.name));
+
+                quote! {
+                    fn #func_name() -> #return_expr {
+                        #func
+                        #(
+                            #field_decls = ::qeap::Qeap::load().expect(#expect_load_msg);
+                            )*
+
+                            let result = #inner_func_name(#(#var_use),*);
+
+                        #(
+                            ::qeap::Qeap::save(&#field_names).expect(#expect_save_msg);
+                        )*
+
+                        result
+                    }
+                }
+            }
+        };
+
+        tokens.extend(t);
+    }
 }
 
-fn do_scoped(scoped_mode: ScopedMode, mut func: ItemFn) -> proc_macro2::TokenStream {
-    let func_name = func.sig.ident.clone();
-    let og_func_output = match &func.sig.output {
+struct ScopedTestAttributes {
+    scoped_mode: ScopedMode,
+    expected_ret_pat: proc_macro2::TokenStream,
+}
+
+impl Default for ScopedTestAttributes {
+    fn default() -> Self {
+        Self {
+            scoped_mode: Default::default(),
+            expected_ret_pat: quote! { () },
+        }
+    }
+}
+
+impl Parse for ScopedTestAttributes {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let mut attrs = Self::default();
+
+        while !input.is_empty() {
+            let key: Ident = input.parse()?;
+
+            input.parse::<Token![=]>()?;
+
+            match key.to_string().to_lowercase().as_str() {
+                "mode" => {
+                    let scoped_mode: ScopedMode = input.parse()?;
+                    attrs.scoped_mode = scoped_mode;
+                }
+                "expected_ret_pat" => {
+                    let expr: Pat = Pat::parse_single(input)?;
+                    attrs.expected_ret_pat = quote! { #expr };
+                }
+                _ => {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        format!(
+                            "unknown attribute argument: {}. Expected 'mode' or 'expected'",
+                            key
+                        ),
+                    ));
+                }
+            }
+
+            if let Err(_) = input.parse::<Token![,]>() {
+                break;
+            }
+        }
+
+        Ok(attrs)
+    }
+}
+
+fn create_scoped_fn(scoped_mode: ScopedMode, func: ItemFn) -> ScopedFn {
+    let scoped_fields = gather_scoped_fields(&func);
+
+    let output = determine_scoped_fn_output(scoped_mode, &func.sig.output);
+
+    ScopedFn {
+        scoped_mode,
+        output,
+        scoped_fields,
+        og_func: func,
+    }
+}
+
+fn determine_scoped_fn_output(
+    scoped_mode: ScopedMode,
+    original_return_type: &ReturnType,
+) -> proc_macro2::TokenStream {
+    let original_output = match original_return_type {
         ReturnType::Default => quote! { () },
         ReturnType::Type(_, ty) => quote! { #ty },
     };
 
-    let scoped_fields = gather_scoped_fields(&func);
-
-    let var_use = scoped_fields.iter().map(ScopeField::as_var_use);
-    let field_decls = scoped_fields.iter().map(ScopeField::as_field_declaration);
-    let field_names = scoped_fields.iter().map(|f| &f.name);
-
-    let inner_func_name = Ident::new(&format!("{}_inner", func_name), Span::call_site());
-
-    func.sig.ident = inner_func_name.clone();
-
     match scoped_mode {
         ScopedMode::Nested => {
-            quote! {
-                fn #func_name() -> ::std::result::Result<#og_func_output, ::qeap::error::Error> {
-                    #func
-                    #(
-                        #field_decls = ::qeap::Qeap::load()?;
-                        )*
-
-                        let result = #inner_func_name(#(#var_use),*);
-
-                    #(
-                        ::qeap::Qeap::save(&#field_names)?;
-                    )*
-
-                    Ok(result)
-                }
-            }
+            quote! { ::std::result::Result<#original_output, ::qeap::error::Error> }
         }
-        ScopedMode::Absorb => {
-            quote! {
-                fn #func_name() -> #og_func_output {
-                    #func
-                    #(
-                        #field_decls = ::qeap::Qeap::load()?;
-                        )*
-
-                        let result = #inner_func_name(#(#var_use),*);
-
-                    #(
-                        ::qeap::Qeap::save(&#field_names).map_err(|e| ::qeap::error::Error::Save(e))?;
-                    )*
-
-                    result
-                }
-            }
-        }
-        ScopedMode::FlattenErased => {
-            let result_type = match &func.sig.output {
-                ReturnType::Default => quote! {
-                    ::std::result::Result<(), ::qeap::error::FlattenErasedError>
-                },
-                ReturnType::Type(_, ty) => {
-                    let ok_ty = match get_result_path_segment(ty) {
-                        Some(seg) => extract_result_ok_type(seg),
-                        None => &**ty,
-                    };
-
-                    quote! {
-                        ::std::result::Result<#ok_ty, ::qeap::error::FlattenErasedError>
+        ScopedMode::Flatten => match original_return_type {
+            ReturnType::Default => quote! {
+                ::std::result::Result<(), ::qeap::error::FlattenedError<::std::convert::Infallible>>
+            },
+            ReturnType::Type(_, ty) => {
+                let (ok_ty, err_ty) = match get_result_path_segment(ty) {
+                    Some(seg) => {
+                        let (ok_ty, err_ty) = extract_result_ok_err_types(seg);
+                        (quote! {#ok_ty}, quote! {#err_ty})
                     }
-                }
-            };
-
-            quote! {
-                fn #func_name() -> #result_type {
-                    #func
-                    #(
-                        #field_decls = ::qeap::Qeap::load()?;
-                    )*
-
-                    let result = ::qeap::transform::IntoFlattenErasedResult::into_flatten_erased(#inner_func_name(#(#var_use),*));
-
-                    #(
-                        ::qeap::Qeap::save(&#field_names).map_err(|e| ::qeap::error::Error::Save(e))?;
-                    )*
-
-                    result
+                    None => (quote! { #ty }, quote! { ::std::convert::Infallible }),
+                };
+                quote! {
+                    ::std::result::Result<#ok_ty, ::qeap::error::FlattenedError<#err_ty>>
                 }
             }
-        }
-        ScopedMode::Flatten => {
-            let result_type = match &func.sig.output {
-                ReturnType::Default => quote! {
-                    ::std::result::Result<(), ::qeap::error::FlattenedError<::std::convert::Infallible>>
-                },
-                ReturnType::Type(_, ty) => {
-                    let (ok_ty, err_ty) = match get_result_path_segment(ty) {
-                        Some(seg) => {
-                            let (ok_ty, err_ty) = extract_result_ok_err_types(seg);
-                            (quote! {#ok_ty}, quote! {#err_ty})
-                        }
-                        None => (quote! { #ty }, quote! { ::std::convert::Infallible }),
-                    };
-                    quote! {
-                        ::std::result::Result<#ok_ty, ::qeap::error::FlattenedError<#err_ty>>
-                    }
-                }
-            };
+        },
+        ScopedMode::FlattenErased => match original_return_type {
+            ReturnType::Default => quote! {
+                ::std::result::Result<(), ::qeap::error::FlattenErasedError>
+            },
+            ReturnType::Type(_, ty) => {
+                let ok_ty = match get_result_path_segment(ty) {
+                    Some(seg) => extract_result_ok_type(seg),
+                    None => &**ty,
+                };
 
-            quote! {
-                fn #func_name() -> #result_type {
-                    #func
-                    #(
-                        #field_decls = ::qeap::Qeap::load()?;
-                    )*
-
-                    let result = ::qeap::transform::IntoFlattenedResult::into_flattened(#inner_func_name(#(#var_use),*));
-
-                    #(
-                        ::qeap::Qeap::save(&#field_names)?;
-                    )*
-
-                    result
+                quote! {
+                    ::std::result::Result<#ok_ty, ::qeap::error::FlattenErasedError>
                 }
             }
-        }
-        ScopedMode::Expect => {
-            let expect_save_msg = scoped_fields
-                .iter()
-                .map(|f| format!("{} data should save successfully", f.name));
-            let expect_load_msg = scoped_fields
-                .iter()
-                .map(|f| format!("{} data should load successfully", f.name));
-
-            quote! {
-                fn #func_name() -> #og_func_output {
-                    #func
-                    #(
-                        #field_decls = ::qeap::Qeap::load().expect(#expect_load_msg);
-                        )*
-
-                        let result = #inner_func_name(#(#var_use),*);
-
-                    #(
-                        ::qeap::Qeap::save(&#field_names).expect(#expect_save_msg);
-                    )*
-
-                    result
-                }
-            }
-        }
+        },
+        ScopedMode::Absorb | ScopedMode::Expect => quote! { #original_output },
     }
 }
