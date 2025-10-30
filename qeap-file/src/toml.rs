@@ -41,6 +41,6 @@ where
     }
 
     fn ext() -> &'static str {
-        "json"
+        "toml"
     }
 }
