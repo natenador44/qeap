@@ -44,49 +44,37 @@ pub fn derive_qeap(input: TokenStream) -> TokenStream {
     let qeap_attrs = QeapAttributes::parse(&c.attrs);
 
     let type_name = &c.ident;
-    let file_name = format!("{}.json", type_name);
+    let type_name_str = c.ident.to_string();
 
     let root_dir = qeap_attrs
         .dir
         .expect("`dir` is required: #[qeap(dir = <expr>)]");
 
+    let persistence_mechanism_create = quote! {
+        ::qeap::file::FileMechanism::<::qeap::file::json::Json<Self>>::new(#root_dir)
+    };
+
     let out = quote! {
-        impl #type_name {
-            fn init() -> Result<(), qeap::error::InitError> {
-                std::fs::create_dir_all(#root_dir)?;
-                Ok(())
-            }
-
-            pub fn file_path() -> std::path::PathBuf {
-                std::path::PathBuf::from(#root_dir).join(Self::FILE_NAME)
-            }
-        }
-
         impl qeap::Qeap for #type_name {
-            const FILE_NAME: &str = #file_name;
+            type Persistence = ::qeap::file::FileMechanism<::qeap::file::json::Json<Self>>;
 
             fn load() -> qeap::QeapResult<Self>
             where
                 Self: Sized
             {
-                let path = Self::file_path();
-
-                Self::init()?;
-
-                if !path.exists() {
-                    let value = Self::default();
-                    qeap::save::json(path, &value)?;
-                    Ok(value)
-                } else {
-                    qeap::load::json(path)
-                }
+                let p = <Self as ::qeap::Qeap>::create_persistence();
+                ::qeap::PersistenceMechanism::init(&p)?;
+                ::qeap::PersistenceMechanism::load(&p, #type_name_str)
             }
 
-            fn save(&self) -> qeap::QeapSaveResult<()> {
-                Self::init()?;
-                let path = Self::file_path();
+            fn save(&self) -> qeap::QeapResult<()> {
+                let p = <Self as ::qeap::Qeap>::create_persistence();
+                ::qeap::PersistenceMechanism::init(&p)?;
+                ::qeap::PersistenceMechanism::save(&p, self, #type_name_str)
+            }
 
-                qeap::save::json(path, self)
+            fn create_persistence() -> Self::Persistence {
+                #persistence_mechanism_create
             }
         }
     };
@@ -409,7 +397,7 @@ impl ToTokens for ScopedFn {
                             let result = #inner_func_name(#(#var_use),*);
 
                         #(
-                            ::qeap::Qeap::save(&#field_names).map_err(|e| ::qeap::error::Error::Save(e))?;
+                            ::qeap::Qeap::save(&#field_names)?;
                         )*
 
                         result
@@ -427,7 +415,7 @@ impl ToTokens for ScopedFn {
                         let result = ::qeap::transform::IntoFlattenErasedResult::into_flatten_erased(#inner_func_name(#(#var_use),*));
 
                         #(
-                            ::qeap::Qeap::save(&#field_names).map_err(|e| ::qeap::error::Error::Save(e))?;
+                            ::qeap::Qeap::save(&#field_names)?;
                         )*
 
                         result

@@ -1,4 +1,6 @@
-use std::{io, path::PathBuf};
+use std::{fmt::Display, io, path::PathBuf};
+
+use crate::transform::DynError;
 
 pub type FlattenErasedError = FlattenedError<Box<dyn std::error::Error>>;
 
@@ -10,36 +12,62 @@ pub enum FlattenedError<E> {
     User(E),
 }
 
-impl<E> From<SaveError> for FlattenedError<E> {
-    fn from(value: SaveError) -> Self {
-        Self::Qeap(Error::Save(value))
+#[derive(Debug, thiserror::Error)]
+#[error("failed to {ty} qeap data: {cause}")]
+pub struct Error {
+    cause: DynError,
+    ty: ErrorType,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub struct SimpleErr(pub String);
+
+impl Error {
+    pub fn load<E>(err: E) -> Self
+    where
+        E: std::error::Error + 'static,
+    {
+        Self {
+            cause: Box::new(err) as DynError,
+            ty: ErrorType::Load,
+        }
+    }
+
+    pub fn save<E>(err: E) -> Self
+    where
+        E: std::error::Error + 'static,
+    {
+        Self {
+            cause: Box::new(err) as DynError,
+            ty: ErrorType::Save,
+        }
+    }
+
+    pub fn init<E>(err: E) -> Self
+    where
+        E: std::error::Error + 'static,
+    {
+        Self {
+            cause: Box::new(err) as DynError,
+            ty: ErrorType::Init,
+        }
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    #[error("{0}")]
-    Init(#[from] InitError),
-    #[error("Failed to open {0} for reading: {1}")]
-    Open(PathBuf, io::Error),
-    #[error("Failed to parse {0} as JSON: {1}")]
-    JsonParse(PathBuf, serde_json::Error),
-    #[error("Failed to save initial state: {0}")]
-    Save(#[from] SaveError),
+#[derive(Debug)]
+pub enum ErrorType {
+    Load,
+    Save,
+    Init,
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum SaveError {
-    #[error("{0}")]
-    Init(#[from] InitError),
-    #[error("Failed to open {0} for writing: {1}")]
-    Open(PathBuf, io::Error),
-    #[error("Failed to parse {0} as JSON: {1}")]
-    JsonWrite(PathBuf, serde_json::Error),
-    #[error("Failed to save due to lock poisoning")]
-    LockPoison,
+impl Display for ErrorType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ErrorType::Load => write!(f, "load"),
+            ErrorType::Save => write!(f, "save"),
+            ErrorType::Init => write!(f, "init"),
+        }
+    }
 }
-
-#[derive(Debug, thiserror::Error)]
-#[error("Failed to initialize root directory: {0}")]
-pub struct InitError(#[from] io::Error);

@@ -49,23 +49,20 @@ fn config_rc_ref_cell(config: Rc<RefCell<Config>>) {
 }
 
 #[qeap::scoped]
-fn config_arc(config: Arc<Config>) -> qeap::QeapResult<()> {
+fn config_arc(config: Arc<Config>) {
     println!("{}", config.port);
-    Ok(())
 }
 
 #[qeap::scoped]
-fn config_arc_mutex(config: Arc<Mutex<Config>>) -> qeap::QeapResult<()> {
+fn config_arc_mutex(config: Arc<Mutex<Config>>) {
     let c = config.lock().unwrap();
     println!("{}", c.port);
-    Ok(())
 }
 
 #[qeap::scoped]
-fn config_arc_rwlock(config: Arc<RwLock<Config>>) -> qeap::QeapResult<()> {
+fn config_arc_rwlock(config: Arc<RwLock<Config>>) {
     let c = config.read().unwrap();
     println!("{}", c.port);
-    Ok(())
 }
 
 #[cfg(test)]
@@ -108,7 +105,7 @@ mod tests {
     qeap_test!(load_creates_file_with_name_of_type => {
         Config::load().unwrap();
 
-        assert!(Config::file_path().exists());
+        assert!(Config::create_persistence().root_dir().exists());
     });
 
     qeap_test!(save_works => {
