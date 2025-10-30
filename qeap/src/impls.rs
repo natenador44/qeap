@@ -5,13 +5,11 @@ use std::{
 };
 
 use crate::{
-    Qeap, QeapResult,
+    PersistenceMechanism, Qeap, QeapResult,
     error::{Error, SimpleErr},
 };
 
 impl<T: Qeap> Qeap for Mutex<T> {
-    type Persistence = T::Persistence;
-
     fn load() -> QeapResult<Self>
     where
         Self: Sized,
@@ -26,15 +24,9 @@ impl<T: Qeap> Qeap for Mutex<T> {
             .map_err(|e| Error::save(SimpleErr(e.to_string())))?;
         (&*guard).save()
     }
-
-    fn create_persistence() -> Self::Persistence {
-        T::create_persistence()
-    }
 }
 
 impl<T: Qeap> Qeap for RefCell<T> {
-    type Persistence = T::Persistence;
-
     fn load() -> QeapResult<Self>
     where
         Self: Sized,
@@ -48,15 +40,9 @@ impl<T: Qeap> Qeap for RefCell<T> {
 
         (&*data).save()
     }
-
-    fn create_persistence() -> Self::Persistence {
-        T::create_persistence()
-    }
 }
 
 impl<T: Qeap> Qeap for RwLock<T> {
-    type Persistence = T::Persistence;
-
     fn load() -> QeapResult<Self>
     where
         Self: Sized,
@@ -72,15 +58,9 @@ impl<T: Qeap> Qeap for RwLock<T> {
         (&*guard).save()?;
         Ok(())
     }
-
-    fn create_persistence() -> Self::Persistence {
-        T::create_persistence()
-    }
 }
 
 impl<T: Qeap> Qeap for Rc<T> {
-    type Persistence = T::Persistence;
-
     fn load() -> QeapResult<Self>
     where
         Self: Sized,
@@ -92,15 +72,9 @@ impl<T: Qeap> Qeap for Rc<T> {
     fn save(&self) -> QeapResult<()> {
         T::save(&*self)
     }
-
-    fn create_persistence() -> Self::Persistence {
-        T::create_persistence()
-    }
 }
 
 impl<T: Qeap> Qeap for Arc<T> {
-    type Persistence = T::Persistence;
-
     fn load() -> QeapResult<Self>
     where
         Self: Sized,
@@ -112,8 +86,23 @@ impl<T: Qeap> Qeap for Arc<T> {
     fn save(&self) -> QeapResult<()> {
         T::save(&*self)
     }
+}
 
-    fn create_persistence() -> Self::Persistence {
-        T::create_persistence()
+impl<T> PersistenceMechanism for &T
+where
+    T: PersistenceMechanism,
+{
+    type Output = T::Output;
+
+    fn init(&self) -> QeapResult<()> {
+        (&**self).init()
+    }
+
+    fn load(&self, name: &str) -> QeapResult<Self::Output> {
+        (&**self).load(name)
+    }
+
+    fn save(&self, data: &Self::Output, name: &str) -> QeapResult<()> {
+        (&**self).save(data, name)
     }
 }

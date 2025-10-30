@@ -10,27 +10,28 @@ use syn::{
 use quote::{ToTokens, quote};
 
 struct QeapAttributes {
-    dir: Option<Expr>,
+    persist_with: Option<Expr>,
 }
 
 impl QeapAttributes {
     fn parse(attrs: &[Attribute]) -> Self {
-        let mut qeap_attrs = Self { dir: None };
+        let mut qeap_attrs = Self { persist_with: None };
 
         for attr in attrs {
             if !attr.path().is_ident("qeap") {
                 continue;
             }
+
             attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("dir") {
+                if meta.path.is_ident("persist_with") {
                     let _ = meta.input.parse::<Token![=]>()?;
 
-                    qeap_attrs.dir = Some(meta.input.parse::<Expr>()?);
+                    qeap_attrs.persist_with = Some(meta.input.parse::<Expr>()?);
                 }
 
                 Ok(())
             })
-            .expect("Expected dir = <expr>");
+            .expect("persist_with = <expr>");
         }
 
         qeap_attrs
@@ -46,60 +47,26 @@ pub fn derive_qeap(input: TokenStream) -> TokenStream {
     let type_name = &c.ident;
     let type_name_str = c.ident.to_string();
 
-    let root_dir = qeap_attrs
-        .dir
-        .expect("`dir` is required: #[qeap(dir = <expr>)]");
-
-    let persistence_mechanism_create = quote! {
-        ::qeap::file::FileMechanism::<::qeap::file::json::Json<Self>>::new(#root_dir)
-    };
+    let persistence_mechanism_create = qeap_attrs
+        .persist_with
+        .expect("persist_with = <expr> is required");
 
     let out = quote! {
         impl qeap::Qeap for #type_name {
-            type Persistence = ::qeap::file::FileMechanism<::qeap::file::json::Json<Self>>;
-
             fn load() -> qeap::QeapResult<Self>
             where
                 Self: Sized
             {
-                let p = <Self as ::qeap::Qeap>::create_persistence();
+                let p = #persistence_mechanism_create;
                 ::qeap::PersistenceMechanism::init(&p)?;
                 ::qeap::PersistenceMechanism::load(&p, #type_name_str)
             }
 
             fn save(&self) -> qeap::QeapResult<()> {
-                let p = <Self as ::qeap::Qeap>::create_persistence();
+                let p = #persistence_mechanism_create;
                 ::qeap::PersistenceMechanism::init(&p)?;
                 ::qeap::PersistenceMechanism::save(&p, self, #type_name_str)
             }
-
-            fn create_persistence() -> Self::Persistence {
-                #persistence_mechanism_create
-            }
-        }
-    };
-
-    out.into()
-}
-
-#[proc_macro_attribute]
-pub fn scoped_test(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let test_attributes = parse_macro_input!(attr as ScopedTestAttributes);
-    let func = parse_macro_input!(item as syn::ItemFn);
-
-    let scoped_fn = create_scoped_fn(test_attributes.scoped_mode, func);
-    let scoped_fn_name = &scoped_fn.og_func.sig.ident;
-
-    let test_fn_name = Ident::new(&format!("test_{}", scoped_fn_name), Span::call_site());
-
-    let expected_output = test_attributes.expected_ret_pat;
-
-    let out = quote! {
-        #[test]
-        fn #test_fn_name() {
-            #scoped_fn
-            let actual = #scoped_fn_name(); // this does nothing right now.. but let's the test run at least
-            assert!(matches!(actual, #expected_output));
         }
     };
 

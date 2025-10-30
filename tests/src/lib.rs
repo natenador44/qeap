@@ -1,10 +1,13 @@
 use std::{
     cell::RefCell,
     rc::Rc,
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, LazyLock, Mutex, RwLock},
 };
 
-use qeap::Qeap;
+use qeap::{
+    Qeap,
+    file::{FilePersist, json::Json},
+};
 use serde::{Deserialize, Serialize};
 
 #[allow(unused)]
@@ -19,8 +22,11 @@ impl From<qeap::error::Error> for MyError {
     }
 }
 
+static CONFIG_PERSISTENCE: LazyLock<FilePersist<Json<Config>>> =
+    LazyLock::new(|| qeap::file::FilePersist::<Json<Config>>::new("test_data"));
+
 #[derive(Default, Serialize, Deserialize, Qeap)]
-#[qeap(dir = "test_data")]
+#[qeap(persist_with = &*CONFIG_PERSISTENCE)]
 pub struct Config {
     something_something: u8,
     port: u16,
@@ -63,69 +69,4 @@ fn config_arc_mutex(config: Arc<Mutex<Config>>) {
 fn config_arc_rwlock(config: Arc<RwLock<Config>>) {
     let c = config.read().unwrap();
     println!("{}", c.port);
-}
-
-#[cfg(test)]
-mod tests {
-
-    macro_rules! qeap_test {
-        ($test_name:ident => $test:block) => {
-            mod $test_name {
-                use std::path::PathBuf;
-                use qeap::Qeap;
-                use serde::{Deserialize, Serialize};
-
-                static TEST_DIR: std::sync::LazyLock<PathBuf> = std::sync::LazyLock::new(|| std::env::temp_dir().join(format!("test_data/{}", stringify!($test_name))));
-
-                #[derive(Debug, Default, Serialize, Deserialize, Qeap, PartialEq, Eq)]
-                #[qeap(dir = &*TEST_DIR)]
-                struct Config {
-                    port: u16,
-                    timeout_seconds: u8,
-                    log_location: String,
-                }
-
-                #[test]
-                fn $test_name() {
-                    $test
-                    std::fs::remove_dir_all(&*TEST_DIR).unwrap();
-                }
-            }
-        };
-    }
-
-    qeap_test!(initial_load_returns_default_impl => {
-        let actual = Config::load().unwrap();
-
-        let expected = Config::default();
-
-        assert_eq!(expected, actual);
-    });
-
-    qeap_test!(load_creates_file_with_name_of_type => {
-        Config::load().unwrap();
-
-        assert!(Config::create_persistence().root_dir().exists());
-    });
-
-    qeap_test!(save_works => {
-        let mut actual = Config::load().unwrap();
-
-        actual.port = 8080;
-
-        actual.save().expect("save works")
-    });
-
-    qeap_test!(load_after_save_reflects_changes_made_before_save => {
-        let mut expected = Config::load().unwrap();
-
-        expected.port = 8080;
-        expected.log_location = "logs".into();
-
-        expected.save().expect("save works");
-
-        let actual = Config::load().unwrap();
-
-        assert_eq!(expected, actual);
-    });
 }

@@ -38,12 +38,12 @@ pub trait FileFormat {
     fn ext() -> &'static str;
 }
 
-pub struct FileMechanism<F> {
+pub struct FilePersist<F> {
     root_dir: PathBuf,
     _phantom: PhantomData<F>,
 }
 
-impl<F> FileMechanism<F>
+impl<F> FilePersist<F>
 where
     F: FileFormat,
 {
@@ -65,7 +65,7 @@ where
     }
 }
 
-impl<T, F> PersistenceMechanism for FileMechanism<F>
+impl<T, F> PersistenceMechanism for FilePersist<F>
 where
     F: FileFormat<Data = T>,
     T: Default,

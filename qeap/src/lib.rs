@@ -11,19 +11,14 @@ extern crate qeap_macro;
 
 pub use qeap_macro::Qeap;
 pub use qeap_macro::scoped;
-pub use qeap_macro::scoped_test;
 
 pub type QeapResult<T> = Result<T, error::Error>;
 
 pub trait Qeap {
-    type Persistence: PersistenceMechanism;
-
     fn load() -> QeapResult<Self>
     where
         Self: Sized;
     fn save(&self) -> QeapResult<()>;
-
-    fn create_persistence() -> Self::Persistence;
 }
 
 pub trait PersistenceMechanism {
