@@ -10,12 +10,12 @@ use syn::{
 use quote::{ToTokens, quote};
 
 struct QeapAttributes {
-    persist_with: Option<Expr>,
+    with: Option<Expr>,
 }
 
 impl QeapAttributes {
     fn parse(attrs: &[Attribute]) -> Self {
-        let mut qeap_attrs = Self { persist_with: None };
+        let mut qeap_attrs = Self { with: None };
 
         for attr in attrs {
             if !attr.path().is_ident("qeap") {
@@ -23,15 +23,15 @@ impl QeapAttributes {
             }
 
             attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("persist_with") {
+                if meta.path.is_ident("with") {
                     let _ = meta.input.parse::<Token![=]>()?;
 
-                    qeap_attrs.persist_with = Some(meta.input.parse::<Expr>()?);
+                    qeap_attrs.with = Some(meta.input.parse::<Expr>()?);
                 }
 
                 Ok(())
             })
-            .expect("persist_with = <expr>");
+            .expect("with = <expr>");
         }
 
         qeap_attrs
@@ -47,9 +47,7 @@ pub fn derive_qeap(input: TokenStream) -> TokenStream {
     let type_name = &c.ident;
     let type_name_str = c.ident.to_string();
 
-    let persistence_mechanism_create = qeap_attrs
-        .persist_with
-        .expect("persist_with = <expr> is required");
+    let persistence_mechanism_create = qeap_attrs.with.expect("with = <expr> is required");
 
     let out = quote! {
         impl qeap::Qeap for #type_name {

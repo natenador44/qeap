@@ -47,13 +47,36 @@ use qeap::Qeap;
 use serde::{Serialize, Deserialize};
 
 #[derive(Default, Debug, Serialize, Deserialize, Qeap)]
-#[qeap(persist_with = qeap_file::JsonFile::new("app_data"))]
+#[qeap(with = qeap_file::JsonFile::new("app_data"))]
 struct AppConfig {
     port: u16,
     max_connections: u32,
     api_key: Option<String>,
 }
 ```
+
+Note: For persistence mechanisms that are expensive to create, you can use something like `LazyLock` from the standard library.
+
+```rust
+use qeap::Qeap;
+use serde::{Serialize, Deserialize};
+use std::sync::LazyLock;
+
+static DATABASE: LazyLock<AppConfigDatabase> = LazyLock::new(|| {
+    let url = std::env::var("APP_CONFIG_DB_URL").expect("APP_CONFIG_DB_URL environment variable is required");
+    AppConfigDatabase::connect(url).expect("connection successful")
+})
+
+#[derive(Default, Debug, Serialize, Deserialize, Qeap)]
+#[qeap(with = &*DATABASE)]
+struct AppConfig {
+    port: u16,
+    max_connections: u32,
+    api_key: Option<String>,
+}
+```
+
+In the future there may be a `try_with` to handle persistence creation errors.
 
 ### 2. Load and Save Data
 
@@ -107,16 +130,17 @@ You would call this like so.
 ```rust
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     update_port()?;
+    Ok(())
 }
 ```
 
-I personally am not a fan of this for several reasons.
+While techniclly possible, I personally am not a fan of this for several reasons.
 1. The call signature is different than the defined signature and can be confusing.
 2. You can't specify additional, non-`Qeap` function parameters. It's all or none (at least for now - not sure how that would look but it's something I'm going to go for eventually if the desire is there).
 
 This is why I recommend using this for global application data that you want to load when your program first starts up.
 
-It is technically still an option though, so `scoped` has a few options to modify how it works and what the scoped function returns.
+However, for those who are fine with this, `scoped` has a few modes you can specify that modify how it works and what the scoped function returns.
 
 ##### Scoped Modes
 You do have some control over how the `scoped` function is generated, via "modes" you can specify which change what the function returns.
@@ -169,7 +193,7 @@ impl From<qeap::error::Error> for MyError {
     }
 }
 
-#[qeap::scoped(flatten)]
+#[qeap::scoped(absorb)]
 fn do_something(app_data: &AppData) -> Result<u16, MyError> {
     match app_data.port {
         8080 => Err(MyError::InvalidPort),
@@ -196,7 +220,7 @@ enum MyError {
 }
 
 
-#[qeap::scoped(flatten)]
+#[qeap::scoped(expect)]
 fn do_something(app_data: &AppData) -> Result<u16, MyError> {
     match app_data.port {
         8080 => Err(MyError::InvalidPort),
@@ -226,7 +250,7 @@ For file-based persistence with various formats:
 use qeap_file::{JsonFile, TomlFile, YamlFile};
 
 #[derive(Default, Serialize, Deserialize, Qeap)]
-#[qeap(persist_with = TomlFile::new("config_dir"))]
+#[qeap(with = TomlFile::new("config_dir"))]
 struct Config {
     theme: String,
     font_size: u8,
@@ -264,13 +288,12 @@ impl PersistenceMechanism for DatabaseBackend {
 }
 ```
 
-## Interior Mutability
-
-QEAP supports using wrapper types like `Arc`, `Rc`, `Mutex`, and `RefCell` as parameters in `scoped` functions:
+## Scoped Supported Types
+QEAP supports `&T` and `&mut T` parameters, as well as wrapper types like `Arc`, `Rc`, `Mutex`, and `RefCell` as parameters in `scoped` functions.
 
 ```rust
 #[derive(Default, Serialize, Deserialize, Qeap)]
-#[qeap(persist_with = JsonFile::new("data"))]
+#[qeap(with = JsonFile::new("data"))]
 struct AppState {
     counter: u32,
     items: Vec<String>,
@@ -287,10 +310,29 @@ fn main(state: Arc<Mutex<AppState>>) -> Result<(), qeap::Error> {
 
 Supported wrapper types for `scoped` parameters:
 - `Arc<T>`
+- `RwLock<T>
 - `Rc<T>`
 - `Mutex<T>`
 - `RefCell<T>`
 - Combinations like `Arc<Mutex<T>>`
+
+You can also implement your own if `qeap` doesn't automatically implement it for you.
+```rust
+struct MyWrapperType<T>(T);
+
+impl<T> qeap::Qeap for MyWrapperType<T> {
+    fn load() -> QeapResult<Self>
+    where
+        Self: Sized
+    {
+        Ok(MyWrapperType(T::load()?))
+    }
+
+    fn save(&self) -> QeapResult<()> {
+        self.0.save()
+    }
+}
+```
 
 **Note**: Whether wrapper types can be used *within* your data structures (e.g., `struct AppState { counter: RefCell<u32> }`) depends on your persistence mechanism's serialization support. For example, `serde` supports these with the appropriate feature flags.
 
@@ -300,14 +342,14 @@ Supported wrapper types for `scoped` parameters:
 
 ```rust
 #[derive(Default, Serialize, Deserialize, Qeap)]
-#[qeap(persist_with = TomlFile::new("app_config"))]
+#[qeap(with = TomlFile::new("app_config"))]
 struct Config {
     port: u16,
     host: String,
 }
 
 #[derive(Default, Serialize, Deserialize, Qeap)]
-#[qeap(persist_with = JsonFile::new("user_data"))]
+#[qeap(with = JsonFile::new("user_data"))]
 struct UserPreferences {
     theme: String,
     notifications: bool,
@@ -320,19 +362,6 @@ fn main(
 ) -> Result<(), qeap::Error> {
     println!("Server: {}:{}", config.host, config.port);
     prefs.notifications = true;  // Saved automatically
-    Ok(())
-}
-```
-
-### Read-only Access
-
-For data that doesn't need to be modified, use immutable references:
-
-```rust
-#[qeap::scoped]
-fn main(config: &AppConfig) -> Result<(), qeap::Error> {
-    // `config` is immutable, no unnecessary save operation
-    println!("Running with config: {:?}", config);
     Ok(())
 }
 ```
