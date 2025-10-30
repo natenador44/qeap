@@ -1,153 +1,412 @@
-# QEAP - Quick and Easy Application Persistence
+# QEAP
 
-QEAP is a Rust library that eliminates the boilerplate typically required for storing and loading application data to/from JSON files on disk. With just a few annotations, you can add persistent storage capabilities to any serializable Rust struct.
+**Q**uick and **E**asy **A**pplication **P**ersistence
 
-## Key Features
+A Rust library that provides a pluggable interface for persisting application data with minimal boilerplate. QEAP acts as an abstraction layer (similar to how `serde` relates to `serde_json`), allowing you to choose your persistence mechanism while keeping your application code clean and simple.
 
-- Zero-boilerplate persistence: Simply derive Qeap on your types and specify a storage directory
-- Automatic file management: Creates directories and JSON files automatically
-- Default initialization: If no saved data exists, loads using the struct's Default implementation
-- Type-safe operations: Leverages Rust's type system and serde for reliable serialization/deserialization
-- Comprehensive error handling: Detailed error types for initialization, file I/O, and JSON parsing operations
-- Scoped operations: Advanced macro for automatic load/save cycles within function scopes
+## Features
 
-## How It Works
-
-QEAP provides a derive macro that automatically implements persistence methods on your structs:
-
--  load(): Loads data from disk, creating a default instance if no file exists
--  save(&self): Saves the current instance to disk
--  file_path(): Returns the full path where the data is stored
-
-The library automatically:
-1. Creates the specified directory structure if it doesn't exist
-2. Generates JSON filenames based on your struct's name (e.g., Config → Config.json)
-3. Handles the complete save/load lifecycle with proper error handling via the `scoped` macro
+- **Pluggable Persistence**: Choose any persistence backend (files, databases, cloud storage, etc.)
+- **Zero-boilerplate**: Simply derive `Qeap` on your types, specify a persistence mechanism, and meet its requirements.
+- **Automatic Load/Save**: The `scoped` macro handles the complete lifecycle automatically
+- **Interior Mutability Support**: Built-in implementations for `RefCell`, `Mutex`, and other wrapper types
+- **Type-safe**: Leverages Rust's type system for reliable operations
+- **Flexible**: Works with any type that implements `PersistenceMechanism`
 
 ## Architecture
 
-The project consists of two main crates:
+QEAP provides two core traits:
 
-- qeap: The main library providing the Qeap trait, load/save functionality, and error types
-- qeap_macro: Procedural macros for the #[derive(Qeap)] and #[qeap::scoped]
+- **`Qeap`**: The main trait that your data types implement (usually via derive macro)
+- **`PersistenceMechanism`**: The trait that defines how data is stored and loaded
+
+This separation allows you to:
+- Use different storage backends for different types
+- Switch persistence mechanisms without changing your data structures
+- Create custom persistence implementations for specific needs
+
+## Installation
+
+Add `qeap` to your project along with a persistence implementation:
+
+```toml
+[dependencies]
+qeap = "0.1"
+qeap-file = "0.1"  # For file-based persistence
+serde = { version = "1.0", features = ["derive"] }
+```
+
+## Basic Usage
+
+### 1. Define Your Data Structure
+
+Derive `Qeap` and specify a persistence mechanism:
+
+```rust
+use qeap::Qeap;
+use serde::{Serialize, Deserialize};
+
+#[derive(Default, Debug, Serialize, Deserialize, Qeap)]
+#[qeap(persist_with = qeap_file::JsonFile::new("app_data"))]
+struct AppConfig {
+    port: u16,
+    max_connections: u32,
+    api_key: Option<String>,
+}
+```
+
+### 2. Load and Save Data
+
+The `Qeap` trait provides methods to interact with your data:
+
+```rust
+fn main() -> Result<(), qeap::Error> {
+    // Load existing data or create with defaults
+    let mut config = AppConfig::load()?;
+
+    // Modify your data
+    config.port = 8080;
+    config.max_connections = 100;
+
+    // Save changes
+    config.save()?;
+
+    Ok(())
+}
+```
+
+### 3. Automatic Scoped Persistence
+
+Use the `scoped` macro to automatically handle load/save cycles:
+
+```rust
+#[qeap::scoped]
+fn main(config: &mut AppConfig) -> Result<(), qeap::Error> {
+    println!("Server running on port {}", config.port);
+    config.port = 9000;  // Changes are automatically saved on exit
+    Ok(())
+}
+```
+
+The `scoped` macro expands your function to:
+1. Load data before the function runs
+2. Execute your function with references to the loaded data
+3. Save data after the function completes
+
+#### Using `scoped`
+The main focus of `scoped` is for use by the `main` function of your application. However, it does not need to be used there. It can be used on any function.
+
+```rust
+#[qeap::scoped]
+fn update_port(app_data: &mut AppConfig) {
+    app_data.port = 8080;
+}
+```
+
+You would call this like so.
+```rust
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    update_port()?;
+}
+```
+
+I personally am not a fan of this for several reasons.
+1. The call signature is different than the defined signature and can be confusing.
+2. You can't specify additional, non-`Qeap` function parameters. It's all or none (at least for now - not sure how that would look but it's something I'm going to go for eventually if the desire is there).
+
+This is why I recommend using this for global application data that you want to load when your program first starts up.
+
+It is technically still an option though, so `scoped` has a few options to modify how it works and what the scoped function returns.
+
+##### Scoped Modes
+You do have some control over how the `scoped` function is generated, via "modes" you can specify which change what the function returns.
+###### nested
+This is the default (used with a plain `#[qeap::scoped]`). This takes whatever is returned from your function and wraps it in a `Result<T, qeap::error::Error>`.
+If `T` is `u16`, then the scoped function will return `Result<u16, qeap::error::Error>`. If your function returns `Result<u16, MyError>`, then
+the scoped function will return `Result<Result<u16, MyError>, qeap::error::Error>`.
+The advantage of this is you can return whatever you want from the function, and don't have to worry about any special rules. The downside is nested types aren't
+ergonomic to deal with.
+If you want to be explicit, you can write `#[qeap::scoped(nested)]`.
+
+###### flatten
+This flattens your type into a top-level `Result`, regardless of the return type.
+For a return type of `u16`, the scoped function will return `Result<u16, qeap::error::FlattenedError<Infallible>>`.
+For a return type of `Result<u16, MyError>`, the scoped function will return `Result<u16, qeap::error::FlattenedError<MyError>>`.
+You can then match on the error to either get the `qeap::error::Error` or your error.
+```rust
+#[qeap::scoped(flatten)]
+fn do_something(app_data: &AppData) -> Result<u16, MyError> {
+    match app_data.port {
+        8080 => Err(MyError::InvalidPort),
+        other => Ok(other)
+    }
+}
+
+fn main() {
+    match do_something() {
+        Ok(port) => println!("{port}"),
+        Err(FlattenedError::Qeap(e)) => println!("failed to persist data: {e}"),
+        Err(MyError::InvalidPort) => println!("app data contained invalid port"),
+    }
+}
+```
+
+This has a similar advantage to `nested`, but is arguably more ergonomic if you need to use the result. It's mostly up to your own personal preference.
+
+###### absorb
+This will work on any function with a return type that matches this requirement: `Result<T, E> where E: From<qeap::error::Error>`.
+This option gives you a more stable signature, since `scoped` doesn't change it, but forces the return type to be a `Result`.
+
+```rust
+enum MyError {
+    InvalidPort,
+    Qeap(qeap::error::Error)
+}
+
+impl From<qeap::error::Error> for MyError {
+    fn from(e: qeap::error::Error) -> Self {
+        Self::Qeap(e)
+    }
+}
+
+#[qeap::scoped(flatten)]
+fn do_something(app_data: &AppData) -> Result<u16, MyError> {
+    match app_data.port {
+        8080 => Err(MyError::InvalidPort),
+        other => Ok(other)
+    }
+}
+
+fn main() {
+    match do_something() {
+        Ok(port) => println!("{port}"),
+        Err(MyError::Qeap(e)) => println!("failed to persist data: {e}"),
+        Err(MyError::InvalidPort) => println!("app data contained invalid port"),
+    }
+}
+```
+
+###### expect
+This option forces all `Qeap` operations to `expect()` success, taking their failure out of the equation from a scoped return type perspective.
+This is the cleanest as far as handling the result of a scoped function, with the downside of `Qeap` crashing your program if it fails.
+
+```rust
+enum MyError {
+    InvalidPort,
+}
+
+
+#[qeap::scoped(flatten)]
+fn do_something(app_data: &AppData) -> Result<u16, MyError> {
+    match app_data.port {
+        8080 => Err(MyError::InvalidPort),
+        other => Ok(other)
+    }
+}
+
+fn main() {
+    match do_something() {
+        Ok(port) => println!("{port}"),
+        Err(MyError::InvalidPort) => println!("app data contained invalid port"),
+    }
+}
+```
+
+If panic handling is introduced to `scoped` in the future, that may make this a bit better.. but I'm still on the fence on panic handling.
+
+## Persistence Implementations
+
+QEAP doesn't provide persistence implementations directly. Instead, use companion crates:
+
+### qeap-file
+
+For file-based persistence with various formats:
+
+```rust
+use qeap_file::{JsonFile, TomlFile, YamlFile};
+
+#[derive(Default, Serialize, Deserialize, Qeap)]
+#[qeap(persist_with = TomlFile::new("config_dir"))]
+struct Config {
+    theme: String,
+    font_size: u8,
+}
+```
+
+Available formats:
+- `JsonFile::new(dir)` - JSON format
+- `TomlFile::new(dir)` - TOML format
+- `YamlFile::new(dir)` - YAML format
+
+Files are automatically named based on your struct name (e.g., `Config` → `config.toml`).
+
+### Custom Persistence
+
+Implement `PersistenceMechanism` for custom storage:
+
+```rust
+use qeap::PersistenceMechanism;
+
+struct DatabaseBackend {
+    connection_string: String,
+}
+
+impl PersistenceMechanism for DatabaseBackend {
+    type Error = MyDatabaseError;
+
+    fn load<T: DeserializeOwned>(&self) -> Result<T, Self::Error> {
+        // Load from database
+    }
+
+    fn save<T: Serialize>(&self, data: &T) -> Result<(), Self::Error> {
+        // Save to database
+    }
+}
+```
+
+## Interior Mutability
+
+QEAP supports using wrapper types like `Arc`, `Rc`, `Mutex`, and `RefCell` as parameters in `scoped` functions:
+
+```rust
+#[derive(Default, Serialize, Deserialize, Qeap)]
+#[qeap(persist_with = JsonFile::new("data"))]
+struct AppState {
+    counter: u32,
+    items: Vec<String>,
+}
+
+#[qeap::scoped]
+fn main(state: Arc<Mutex<AppState>>) -> Result<(), qeap::Error> {
+    let mut state = state.lock().unwrap();
+    state.counter += 1;
+    state.items.push("item".to_string());
+    Ok(())
+}
+```
+
+Supported wrapper types for `scoped` parameters:
+- `Arc<T>`
+- `Rc<T>`
+- `Mutex<T>`
+- `RefCell<T>`
+- Combinations like `Arc<Mutex<T>>`
+
+**Note**: Whether wrapper types can be used *within* your data structures (e.g., `struct AppState { counter: RefCell<u32> }`) depends on your persistence mechanism's serialization support. For example, `serde` supports these with the appropriate feature flags.
+
+## Advanced Examples
+
+### Multiple Data Types
+
+```rust
+#[derive(Default, Serialize, Deserialize, Qeap)]
+#[qeap(persist_with = TomlFile::new("app_config"))]
+struct Config {
+    port: u16,
+    host: String,
+}
+
+#[derive(Default, Serialize, Deserialize, Qeap)]
+#[qeap(persist_with = JsonFile::new("user_data"))]
+struct UserPreferences {
+    theme: String,
+    notifications: bool,
+}
+
+#[qeap::scoped]
+fn main(
+    config: &Config,
+    prefs: &mut UserPreferences,
+) -> Result<(), qeap::Error> {
+    println!("Server: {}:{}", config.host, config.port);
+    prefs.notifications = true;  // Saved automatically
+    Ok(())
+}
+```
+
+### Read-only Access
+
+For data that doesn't need to be modified, use immutable references:
+
+```rust
+#[qeap::scoped]
+fn main(config: &AppConfig) -> Result<(), qeap::Error> {
+    // `config` is immutable, no unnecessary save operation
+    println!("Running with config: {:?}", config);
+    Ok(())
+}
+```
+
+## Error Handling
+
+QEAP provides a unified error type that persistence mechanisms can integrate with:
+
+```rust
+use qeap::Error;
+
+fn process_data() -> Result<(), Error> {
+    let data = MyData::load()?;  // Returns qeap::Error
+    data.save()?;
+    Ok(())
+}
+```
+
+## Limitations and Considerations
+
+### Current Limitations
+
+- **No panic handling**: If code panics within a `scoped` function, data is not saved
+- **No signal handling**: Interrupts (Ctrl+C) or kills won't trigger saves
+- **Synchronous only**: Async support planned for future releases
+- **Performance**: Not optimized for high-frequency saves or performance-critical applications
+
+### Best Practices
+
+- Use QEAP for application configuration, user preferences, and caching
+- Avoid using QEAP in hot loops or performance-critical paths
+- For complex data relationships, consider a proper database
+- Implement proper error handling in your application logic
+
+## Roadmap
+
+- **Async support**: Async versions of `Qeap` trait methods
+- **Signal handling**: Optional feature to save on interrupts
+- **Optimized saves**: Only save when data actually changes
+- **Transaction support**: Atomic save operations for consistency
+- **Additional backends**: Built-in support for more storage types
 
 ## Use Cases
 
 Perfect for:
 - Application configuration files
 - User preferences and settings
-- Cache data that needs persistence
-- Simple data storage without database complexity
-- Rapid prototyping with persistent state
+- Local cache data
+- Development and prototyping
+- Small to medium-sized desktop applications
 
-This library is ideal for developers who want persistent storage with minimal setup - just add the derive macro and you're ready to go!
+Not ideal for:
+- High-performance applications with frequent writes
+- Complex relational data
+- Distributed systems requiring consistency
+- Real-time applications
 
-## What QEAP Is _Not_ Meant For
+## Contributing
 
-- Ease of use is the primary goal of QEAP, so it may not make sense to use this in perfomance critical applications. It _could_ be used without much detriment, if used sparingly. It all depends on your use case.
-- QEAP is not meant to handle complex relationships between the data it manages. If you need to manage complex relationships, you should use something else (like a relational database). There may be some low-hanging fruit that could be implemented in future releases, but nothing complex.
+Contributions are welcome! Whether it's:
+- New persistence mechanism implementations
+- Bug fixes and improvements
+- Documentation enhancements
+- Example applications
 
-## How To Use
-Add `qeap` and `serde` to your project.
-```sh
-cargo add qeap
-cargo add serde -F derive
-```
+## License
 
-Derive `qeap::Qeap`, `serde::Serialize`, and `serde::Deserialize` on the type(s) you wish to manage, then specify the directory you wish the store your data in via the `qeap` attribute macro.
-```rust
-use qeap::Qeap;
-use serde::{Serialize, Deserialize};
-use std::path::PathBuf;
+[Include your license information here]
 
-#[derive(Serialize, Deserialize, Qeap)]
-#[qeap(dir = app_dir())] // `dir` is required
-struct Config {
-    timeout_seconds: u16,
-    port: u16,
-    log_location: PathBuf,
-}
+## Related Crates
 
-fn app_dir() -> PathBuf {
-    std::env::home_dir()
-        .map(|d| d.join("my_app"))
-        .expect("home directory exists")
-}
-```
+- `qeap-file` - File-based persistence with multiple format support
+- `qeap-macro` - Procedural macros (re-exported by `qeap`)
 
-Deriving `qeap::Qeap` adds some methods to your type, `load()` and `save(&self)` (among others). You can use these to initialize an instance of your type and save updates respectively.
+---
 
-```rust
-fn main() -> Result<(), Box<dyn std::error::Error> {
-    let mut config = Config::load()?;
-
-    config.port = 3000;
-    config.save()?;
-}
-```
-
-### `qeap::scoped`
-
-`qeap::scoped` automates things even further. Annotate a function call with `qeap::scoped`, then specify immutable or mutable references to types that derive `qeap::Qeap` as the function arguments. The function is restructured to automatically load the specified data, pass it to your function as requested,
-then save the data to disk.
-The function must have a return type of `Result<T, E> where E: From<qeap::error::Error>`.
-
-```rust
-#[qeap::scoped]
-fn update_port(config: &mut Config) -> qeap::QeapResult<()> {
-    config.port = 8080;
-}
-```
-
-The `update_port` function is expanded into this.
-```rust
-fn update_port() -> qeap::QeapResult<()> {
-    fn update_port_inner(config: &mut Config) -> qeap::QeapResult<()> {
-        config.port = 8080;
-        Ok(())
-    }
-    let mut config: Config = qeap::Qeap::load()?;
-    let result = update_port_inner(&mut config);
-    qeap::Qeap::save(&config)?;
-    return result;
-}
-```
-
-In order to call this function, you would call it without passing arguments.
-
-```rust
-fn main() -> qeap::QeapResult<()> {
-    update_port()?;
-}
-```
-
-Calling a function declared with arguments and not passing any into it at the call site might seem a bit unsavory to a lot of people, and I would agree.
-For those that don't care, you have the option to use this macro as described above. However, the `main` purpose of this macro is to annotate
-the `main` method of your application, like so.
-
-```rust
-#[qeap::scoped]
-fn main(config: &mut Config) -> qeap::QeapResult<()> {
-    // do stuff with `config`
-}
-```
-
-This generates a `main` method for your application that automatically loads the data you need at the start, then saves it right before the application exits.
-
-#### Panic inside `qeap::scoped` functions
-There is no support for panics at the moment. If you annotate a function with `qeap::scoped` and code within that function panics, `qeap::scoped` does not handle that, and will not save your data. This may be supported in the future (as an optional feature). It's important to remember that even if this becomes a feature, it won't do diddly-squat if your executable is configured to abort on panic. This is why I am undecided at the moment.
-
-#### Signals
-`qeap::scoped` does not handle signals sent to your program (e.g. interrupt or kill). So if your function is running and you press Ctrl-c, your data won't be saved.
-
-## Future Features
-
-### Different File Formats
-The user of the library should be able to choose from different file formats (e.g. JSON, TOML, YAML).
-
-### Signal Handling for `qeap::scoped`
-At the moment, if a function annotated with `qeap::scoped` is interrupted or killed, the save will not happen. Ideally there'd be an optional feature that can be turned on that catches these types of signals and handles them gracefully (i.e. saving data managed by QEAP).
-
-### Async Support
-Ideally, `qeap::scoped` could be used with `async` functions. This will require an `async` version of the `Qeap` trait or its methods, which does not exist in this version. It would also require either choosing an async I/O implementation (like tokio), forcing users of the library to use that implementation, or abstracting it away and letting the user choose one. This is all work that will be done, but only in later versions.
-It would also be important that `qeap::scoped` is compatible with other async main method macro alterations, like `tokio::main`.
+For more examples and detailed API documentation, visit [docs.rs/qeap](https://docs.rs/qeap).

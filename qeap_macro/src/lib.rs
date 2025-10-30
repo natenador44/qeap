@@ -196,7 +196,6 @@ enum ScopedMode {
     #[default]
     Nested,
     Flatten,
-    FlattenErased,
     Absorb,
     Expect,
 }
@@ -210,7 +209,6 @@ impl Parse for ScopedMode {
         let ident: Ident = input.parse()?;
 
         let mode = match ident.to_string().to_lowercase().as_str() {
-            "flatten_erased" => Self::FlattenErased,
             "flatten" => Self::Flatten,
             "absorb" => Self::Absorb,
             "expect" => Self::Expect,
@@ -261,34 +259,6 @@ fn extract_result_ok_err_types(result_seg: &PathSegment) -> (&Type, &Type) {
         };
 
         return (ok_ty, err_ty);
-    } else {
-        panic!(
-            "If a Result type is specified, both Ok and Err types (T and E) must be included in the signature"
-        );
-    }
-}
-
-fn extract_result_ok_type(result_seg: &PathSegment) -> &Type {
-    if let PathArguments::AngleBracketed(args) = &result_seg.arguments {
-        let mut iter = args.args.iter();
-
-        let ok_ty = match iter.next() {
-            Some(GenericArgument::Type(ok_ty)) => ok_ty,
-            _ => panic!(
-                "If a Result type is specified, both Ok and Err types (T and E) must be included in the signature"
-            ),
-        };
-
-        if iter
-            .next()
-            .map_or(true, |a| !matches!(a, GenericArgument::Type(_)))
-        {
-            panic!(
-                "If a Result type is specified, both Ok and Err types (T and E) must be included in the signature"
-            );
-        }
-
-        return ok_ty;
     } else {
         panic!(
             "If a Result type is specified, both Ok and Err types (T and E) must be included in the signature"
@@ -362,24 +332,6 @@ impl ToTokens for ScopedFn {
                             )*
 
                             let result = #inner_func_name(#(#var_use),*);
-
-                        #(
-                            ::qeap::Qeap::save(&#field_names)?;
-                        )*
-
-                        result
-                    }
-                }
-            }
-            ScopedMode::FlattenErased => {
-                quote! {
-                    fn #func_name() -> #return_expr {
-                        #func
-                        #(
-                            #field_decls = ::qeap::Qeap::load()?;
-                        )*
-
-                        let result = ::qeap::transform::IntoFlattenErasedResult::into_flatten_erased(#inner_func_name(#(#var_use),*));
 
                         #(
                             ::qeap::Qeap::save(&#field_names)?;
@@ -480,21 +432,6 @@ fn determine_scoped_fn_output(
                 };
                 quote! {
                     ::std::result::Result<#ok_ty, ::qeap::error::FlattenedError<#err_ty>>
-                }
-            }
-        },
-        ScopedMode::FlattenErased => match original_return_type {
-            ReturnType::Default => quote! {
-                ::std::result::Result<(), ::qeap::error::FlattenErasedError>
-            },
-            ReturnType::Type(_, ty) => {
-                let ok_ty = match get_result_path_segment(ty) {
-                    Some(seg) => extract_result_ok_type(seg),
-                    None => &**ty,
-                };
-
-                quote! {
-                    ::std::result::Result<#ok_ty, ::qeap::error::FlattenErasedError>
                 }
             }
         },
