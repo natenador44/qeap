@@ -310,7 +310,7 @@ fn main(state: Arc<Mutex<AppState>>) -> Result<(), qeap::Error> {
 
 Supported wrapper types for `scoped` parameters:
 - `Arc<T>`
-- `RwLock<T>
+- `RwLock<T>`
 - `Rc<T>`
 - `Mutex<T>`
 - `RefCell<T>`
@@ -334,7 +334,8 @@ impl<T> qeap::Qeap for MyWrapperType<T> {
 }
 ```
 
-**Note**: Whether wrapper types can be used *within* your data structures (e.g., `struct AppState { counter: RefCell<u32> }`) depends on your persistence mechanism's serialization support. For example, `serde` supports these with the appropriate feature flags.
+**Note**: Whether wrapper types can be used *within* your data structures (e.g., `struct AppState { counter: RefCell<u32> }`) depends on your persistence mechanism's serialization support.
+For example, persistence mechanisms that utilize `serde` will support these with the appropriate `serde` feature flags.
 
 ## Advanced Examples
 
