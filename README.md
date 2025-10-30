@@ -170,7 +170,7 @@ fn main() {
     match do_something() {
         Ok(port) => println!("{port}"),
         Err(FlattenedError::Qeap(e)) => println!("failed to persist data: {e}"),
-        Err(MyError::InvalidPort) => println!("app data contained invalid port"),
+        Err(FlattenedError::User(MyError::InvalidPort)) => println!("app data contained invalid port"),
     }
 }
 ```
