@@ -1,5 +1,4 @@
 pub mod error;
-pub mod file;
 mod handle;
 mod impls;
 pub mod transform;

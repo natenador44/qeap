@@ -6,9 +6,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-pub mod json;
-
-use crate::{PersistenceMechanism, QeapResult, error::Error, transform::DynError};
+use qeap::{PersistenceMechanism, QeapResult, error::Error, transform::DynError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum FileError {
@@ -16,10 +14,12 @@ pub enum FileError {
     Open(String, io::Error),
     #[error("failed to parse '{0}' as {1}: {2}")]
     Parse(String, &'static str, DynError),
+    #[error("failed to write to file '{0}: {1}")]
+    Write(String, io::Error),
 }
 
 impl FileError {
-    fn parse<E>(path: &Path, format: &'static str, cause: E) -> Self
+    pub fn parse<E>(path: &Path, format: &'static str, cause: E) -> Self
     where
         E: std::error::Error + 'static,
     {
@@ -28,6 +28,14 @@ impl FileError {
             format,
             Box::new(cause) as DynError,
         )
+    }
+
+    pub fn open(path: &Path, cause: io::Error) -> Self {
+        Self::Open(path.display().to_string(), cause)
+    }
+
+    pub fn write(path: &Path, cause: io::Error) -> Self {
+        Self::Write(path.display().to_string(), cause)
     }
 }
 

@@ -1,0 +1,16 @@
+[package]
+name = "qeap-file"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+qeap = { path = "../qeap" }
+serde = "1.0.219"
+serde_json = { version = "1.0.140", optional = true }
+thiserror = "2.0.17"
+toml = { version = "0.9.8", optional = true }
+
+[features]
+default = ["toml"]
+json = ["dep:serde_json"]
+toml = ["dep:toml"]

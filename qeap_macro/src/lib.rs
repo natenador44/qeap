@@ -3,7 +3,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use syn::{
-    Attribute, DeriveInput, Expr, GenericArgument, Ident, ItemFn, Pat, PatType, PathArguments,
+    Attribute, DeriveInput, Expr, GenericArgument, Ident, ItemFn, PatType, PathArguments,
     PathSegment, ReturnType, Token, Type, TypeReference, parse::Parse, parse_macro_input,
 };
 
@@ -437,58 +437,6 @@ impl ToTokens for ScopedFn {
         };
 
         tokens.extend(t);
-    }
-}
-
-struct ScopedTestAttributes {
-    scoped_mode: ScopedMode,
-    expected_ret_pat: proc_macro2::TokenStream,
-}
-
-impl Default for ScopedTestAttributes {
-    fn default() -> Self {
-        Self {
-            scoped_mode: Default::default(),
-            expected_ret_pat: quote! { () },
-        }
-    }
-}
-
-impl Parse for ScopedTestAttributes {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let mut attrs = Self::default();
-
-        while !input.is_empty() {
-            let key: Ident = input.parse()?;
-
-            input.parse::<Token![=]>()?;
-
-            match key.to_string().to_lowercase().as_str() {
-                "mode" => {
-                    let scoped_mode: ScopedMode = input.parse()?;
-                    attrs.scoped_mode = scoped_mode;
-                }
-                "expected_ret_pat" => {
-                    let expr: Pat = Pat::parse_single(input)?;
-                    attrs.expected_ret_pat = quote! { #expr };
-                }
-                _ => {
-                    return Err(syn::Error::new(
-                        key.span(),
-                        format!(
-                            "unknown attribute argument: {}. Expected 'mode' or 'expected'",
-                            key
-                        ),
-                    ));
-                }
-            }
-
-            if let Err(_) = input.parse::<Token![,]>() {
-                break;
-            }
-        }
-
-        Ok(attrs)
     }
 }
 
