@@ -5,7 +5,7 @@ use std::ops::Range;
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use syn::{
-    Attribute, Data, DataStruct, DeriveInput, Expr, GenericArgument, Ident, Index, ItemFn, PatType,
+    Attribute, Data, DeriveInput, Expr, GenericArgument, Ident, Index, ItemFn, PatType,
     PathArguments, PathSegment, ReturnType, Token, Type, TypeReference, parse::Parse,
     parse_macro_input,
 };
