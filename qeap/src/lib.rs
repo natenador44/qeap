@@ -8,6 +8,7 @@ pub use handle::Handle;
 
 extern crate qeap_macro;
 
+pub use qeap_macro::Bundle;
 pub use qeap_macro::Qeap;
 pub use qeap_macro::scoped;
 
@@ -26,3 +27,5 @@ pub trait Qeaper {
     fn load(&self, name: &str) -> QeapResult<Self::Output>;
     fn save(&self, data: &Self::Output, name: &str) -> QeapResult<()>;
 }
+
+pub trait Bundle: Qeap {}

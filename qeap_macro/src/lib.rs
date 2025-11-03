@@ -1,10 +1,13 @@
 // going through youtube tutorial first because I like the way this guy handles proc macros...
 
+use std::ops::Range;
+
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use syn::{
-    Attribute, DeriveInput, Expr, GenericArgument, Ident, ItemFn, PatType, PathArguments,
-    PathSegment, ReturnType, Token, Type, TypeReference, parse::Parse, parse_macro_input,
+    Attribute, Data, DataStruct, DeriveInput, Expr, GenericArgument, Ident, Index, ItemFn, PatType,
+    PathArguments, PathSegment, ReturnType, Token, Type, TypeReference, parse::Parse,
+    parse_macro_input,
 };
 
 use quote::{ToTokens, quote};
@@ -50,7 +53,7 @@ pub fn derive_qeap(input: TokenStream) -> TokenStream {
     let persistence_mechanism_create = qeap_attrs.with.expect("with = <expr> is required");
 
     let out = quote! {
-        impl qeap::Qeap for #type_name {
+        impl ::qeap::Qeap for #type_name {
             fn load() -> qeap::QeapResult<Self>
             where
                 Self: Sized
@@ -66,6 +69,104 @@ pub fn derive_qeap(input: TokenStream) -> TokenStream {
                 ::qeap::Qeaper::save(&p, self, #type_name_str)
             }
         }
+    };
+
+    out.into()
+}
+
+enum BundleStrategy {
+    TupleStruct(Range<usize>),
+    Struct(Vec<Ident>),
+}
+
+struct Bundle {
+    type_name: Ident,
+    strategy: BundleStrategy,
+}
+
+impl ToTokens for Bundle {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        let type_name = &self.type_name;
+        let t = match &self.strategy {
+            BundleStrategy::TupleStruct(range) => {
+                let inits = range.clone().map(|_| quote! { ::qeap::Qeap::load()? });
+                let field_names = range.clone().map(|i| Index::from(i));
+                quote! {
+                    impl ::qeap::Qeap for #type_name {
+                        fn load() -> qeap::QeapResult<Self>
+                        where
+                            Self: Sized
+                        {
+                            Ok(Self(#(#inits),*))
+                        }
+
+                        fn save(&self) -> qeap::QeapResult<()> {
+                            #(
+                                ::qeap::Qeap::save(&self.#field_names)?;
+                            )*
+                            Ok(())
+                        }
+                    }
+                }
+            }
+            BundleStrategy::Struct(idents) => {
+                quote! {
+                    impl ::qeap::Qeap for #type_name {
+                        fn load() -> qeap::QeapResult<Self>
+                        where
+                            Self: Sized
+                        {
+                            Ok(Self {
+                                #(
+                                    #idents: ::qeap::Qeap::load()?
+                                ),*
+                            })
+                        }
+
+                        fn save(&self) -> qeap::QeapResult<()> {
+                            #(
+                                ::qeap::Qeap::save(&self.#idents)?;
+                            )*
+                            Ok(())
+                        }
+                    }
+                }
+            }
+        };
+
+        tokens.extend(t);
+    }
+}
+
+#[proc_macro_derive(Bundle)]
+pub fn derive_qeap_bundle(input: TokenStream) -> TokenStream {
+    let c = parse_macro_input!(input as DeriveInput);
+
+    let type_name = c.ident.clone();
+
+    let out = if let Data::Struct(s) = c.data {
+        let tuple_struct = s.fields.iter().any(|f| f.ident.is_none());
+
+        let bundle = if tuple_struct {
+            Bundle {
+                type_name,
+                strategy: BundleStrategy::TupleStruct(0..s.fields.len()),
+            }
+        } else {
+            Bundle {
+                type_name,
+                strategy: BundleStrategy::Struct(
+                    s.fields
+                        .into_iter()
+                        .map(|f| f.ident.expect("non tuple structs must have field names"))
+                        .collect(),
+                ),
+            }
+        };
+
+        quote! { #bundle }
+    } else {
+        panic!("Only structs are currently supported for Qeap Bundles");
     };
 
     out.into()
@@ -91,9 +192,17 @@ impl ToTokens for VarUse<'_> {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let name = self.name;
         let as_tokens = match self.ref_type {
-            VarType::ImmutableRef(_) => quote! { &#name },
-            VarType::MutableRef(_) => quote! { &mut #name },
-            VarType::Handle(_) => quote! { ::qeap::Handle::new_handle(&#name) },
+            VarType::ImmutableRef(r) => {
+                let ty = &r.elem;
+                quote! { <&#ty as ::qeap::Handle>::new_handle(&#name) }
+            }
+            VarType::MutableRef(r) => {
+                let ty = &r.elem;
+                quote! { <&mut #ty as ::qeap::Handle>::new_handle(&mut #name) }
+            }
+            VarType::Handle(ty) => {
+                quote! { <#ty as ::qeap::Handle>::new_handle(&#name) }
+            }
         };
 
         tokens.extend(as_tokens);
