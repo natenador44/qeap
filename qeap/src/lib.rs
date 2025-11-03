@@ -20,7 +20,7 @@ pub trait Qeap {
     fn save(&self) -> QeapResult<()>;
 }
 
-pub trait PersistenceMechanism {
+pub trait Qeaper {
     type Output;
     fn init(&self) -> QeapResult<()>;
     fn load(&self, name: &str) -> QeapResult<Self::Output>;

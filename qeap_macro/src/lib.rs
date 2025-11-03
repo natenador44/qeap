@@ -56,14 +56,14 @@ pub fn derive_qeap(input: TokenStream) -> TokenStream {
                 Self: Sized
             {
                 let p = #persistence_mechanism_create;
-                ::qeap::PersistenceMechanism::init(&p)?;
-                ::qeap::PersistenceMechanism::load(&p, #type_name_str)
+                ::qeap::Qeaper::init(&p)?;
+                ::qeap::Qeaper::load(&p, #type_name_str)
             }
 
             fn save(&self) -> qeap::QeapResult<()> {
                 let p = #persistence_mechanism_create;
-                ::qeap::PersistenceMechanism::init(&p)?;
-                ::qeap::PersistenceMechanism::save(&p, self, #type_name_str)
+                ::qeap::Qeaper::init(&p)?;
+                ::qeap::Qeaper::save(&p, self, #type_name_str)
             }
         }
     };

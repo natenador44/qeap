@@ -6,7 +6,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use qeap::{PersistenceMechanism, QeapResult, error::Error, transform::DynError};
+use qeap::{QeapResult, Qeaper, error::Error, transform::DynError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum FileError {
@@ -73,7 +73,7 @@ where
     }
 }
 
-impl<T, F> PersistenceMechanism for FilePersist<F>
+impl<T, F> Qeaper for FilePersist<F>
 where
     F: FileFormat<Data = T>,
     T: Default,

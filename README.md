@@ -11,14 +11,14 @@ A Rust library that provides a pluggable interface for persisting application da
 - **Automatic Load/Save**: The `scoped` macro handles the complete lifecycle automatically
 - **Interior Mutability Support**: Built-in implementations for `RefCell`, `Mutex`, and other wrapper types
 - **Type-safe**: Leverages Rust's type system for reliable operations
-- **Flexible**: Works with any type that implements `PersistenceMechanism`
+- **Flexible**: Works with any type that implements `Qeaper`
 
 ## Architecture
 
 QEAP provides two core traits:
 
 - **`Qeap`**: The main trait that your data types implement (usually via derive macro)
-- **`PersistenceMechanism`**: The trait that defines how data is stored and loaded
+- **`Qeaper`**: The trait that defines how data is stored and loaded
 
 This separation allows you to:
 - Use different storage backends for different types
@@ -266,16 +266,16 @@ Files are automatically named based on your struct name (e.g., `Config` → `con
 
 ### Custom Persistence
 
-Implement `PersistenceMechanism` for custom storage:
+Implement `Qeaper` for custom storage:
 
 ```rust
-use qeap::PersistenceMechanism;
+use qeap::Qeaper;
 
 struct DatabaseBackend {
     connection_string: String,
 }
 
-impl PersistenceMechanism for DatabaseBackend {
+impl Qeaper for DatabaseBackend {
     type Error = MyDatabaseError;
 
     fn load<T: DeserializeOwned>(&self) -> Result<T, Self::Error> {

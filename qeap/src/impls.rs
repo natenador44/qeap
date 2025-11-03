@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    PersistenceMechanism, Qeap, QeapResult,
+    Qeap, QeapResult, Qeaper,
     error::{Error, SimpleErr},
 };
 
@@ -88,9 +88,9 @@ impl<T: Qeap> Qeap for Arc<T> {
     }
 }
 
-impl<T> PersistenceMechanism for &T
+impl<T> Qeaper for &T
 where
-    T: PersistenceMechanism,
+    T: Qeaper,
 {
     type Output = T::Output;
 
